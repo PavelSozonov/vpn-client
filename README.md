@@ -101,6 +101,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 }
 ```
 
+Функции `libxray_start` и `libxray_stop` предоставляются библиотекой libXray.
+
 Для управления туннелем в основном приложении используется `NEVPNManager`:
 
 ```swift
@@ -117,6 +119,7 @@ manager.loadFromPreferences { _ in
     }
 }
 ```
+
 Отключение: `manager.connection.stopVPNTunnel()`.
 
 ## Запуск приложения
