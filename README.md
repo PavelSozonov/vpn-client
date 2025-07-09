@@ -1,52 +1,105 @@
 # vpn-client
 
-Этот репозиторий содержит инструкции по созданию iOS‑клиента, способного подключаться к VLESS серверу с использованием библиотеки **libXray** (обёртка над [Xray‑core](https://github.com/XTLS/Xray-core), лицензия MPL‑2.0). Графическая часть приложения разрабатывается отдельно, здесь описывается только Network Extension.
+Этот проект содержит примеры кода и пошаговую инструкцию по созданию минимального iOS‑VPN‑клиента, подключающегося к VLESS серверу с помощью библиотеки **libXray** (обёртка над [Xray-core](https://github.com/XTLS/Xray-core)).
 
 ## Архитектура
 
-* **UI приложение** — основное приложение, отвечает только за отображение состояния подключения и переключатель «Вкл/Выкл». Это обычный iOS‑приложение (Swift/SwiftUI). Оно взаимодействует с VPN‑расширением через `NEVPNManager`.
-* **Network Extension** (целевой тип *Packet Tunnel Provider*) — запускается системой, когда пользователь включает VPN. Внутри расширения вызывается библиотека libXray, которая поднимает туннель и перенаправляет трафик на сервер.
-* **libXray** — скомпилированная как `xcframework` версия Xray-core. Поддерживает VLESS с `reality` и `xtls-rprx-vision`.
+- **UI‑приложение** (SwiftUI) — отображает единственный переключатель включения VPN и отправляет команды расширению через `NEVPNManager`.
+- **Network Extension** (Packet Tunnel Provider) — запускает libXray, который перенаправляет трафик на сервер.
+- **libXray** — собранный в виде `LibXray.xcframework` Xray-core с поддержкой протокола VLESS + Reality.
 
-UI и Extension собираются в рамках одной схемы Xcode и подписываются одним App Group для обмена настройками.
+Обе части используют общий App Group для доступа к файлу конфигурации.
+
+## Структура репозитория
+
+```
+ios/
+  VPNClient/            # исходники основного приложения
+  VPNTunnelExtension/   # исходники Packet Tunnel Provider
+  Shared/               # сюда помещается файл config.json (не хранится в git)
+.gitkeep                # пустышки для сохранения каталогов в репозитории
+scripts/
+  generate_config.py    # генерация config.json из переменных окружения
+.env.example            # пример переменных для настройки соединения
+```
 
 ## Сборка libXray
 
 1. Установите [Go](https://go.dev/dl/) ≥1.20 и Python ≥3.7.
-2. Клонируйте репозиторий:
+2. Склонируйте репозиторий libXray и соберите xcframework:
    ```bash
    git clone https://github.com/XTLS/libXray.git
    cd libXray
-   ```
-3. Запустите скрипт сборки для платформ Apple:
-   ```bash
    python3 build/main.py apple go
    ```
-   В каталоге `output` появится `LibXray.xcframework`.
-4. Скопируйте `LibXray.xcframework` в папку `ios/` текущего проекта и добавьте её в Xcode ("Add files to…").
+   Готовая `LibXray.xcframework` появится в каталоге `output`.
+3. Скопируйте `LibXray.xcframework` в папку `ios/` текущего проекта и добавьте её в оба таргета в Xcode.
 
-## Настройка Xcode проекта
+## Подготовка конфигурации
 
-1. Создайте новое iOS‑приложение (если ещё не создано). Добавьте к нему целевой модуль **Network Extension** типа *Packet Tunnel Provider*.
-2. В разделе "Signing & Capabilities" добавьте *App Groups* (например, `group.vpnclient`), чтобы приложение и расширение могли обмениваться данными.
-3. Включите capability **Personal VPN** для расширения.
-4. Добавьте `LibXray.xcframework` в оба таргета (приложение и расширение).
+Файл `config.json`, который читает расширение, генерируется скриптом `scripts/generate_config.py`. Настройки берутся из переменных окружения. Создайте `.env` на основе `.env.example` и заполните параметры вашего сервера:
 
-Минимальная реализация `PacketTunnelProvider` может выглядеть так:
+```bash
+cp .env.example .env
+# отредактируйте .env, указав реальные значения
+```
+
+Перед сборкой выполните:
+
+```bash
+source .env
+python3 scripts/generate_config.py ios/Shared/config.json
+```
+
+В результате файл `ios/Shared/config.json` будет создан и включён как ресурс обоих таргетов.
+
+## Создание проекта в Xcode
+
+1. Откройте Xcode и выберите **File → New → Project…**. Создайте приложение **App** (SwiftUI, Swift).
+2. В меню **File → New → Target…** добавьте **Network Extension → Packet Tunnel Provider**. Для Bundle Identifier расширения задайте `com.example.vpnclient.VPNTunnelExtension` (можно изменить на свой, но не забудьте обновить его в коде).
+3. В обоих таргетах (приложение и расширение) на вкладке **Signing & Capabilities** добавьте:
+   - **App Groups** → `group.vpnclient` (название можно изменить, но оно должно совпадать в коде).
+   - Для расширения включите capability **Personal VPN**.
+4. Добавьте `LibXray.xcframework` в секцию **Frameworks, Libraries, and Embedded Content** обоих таргетов.
+5. Добавьте созданный `ios/Shared/config.json` в оба таргета как ресурс (drag&drop в Project Navigator → выберите оба таргета).
+6. Убедитесь, что в настройках схемы приложение и расширение подписываются одной командой разработчика.
+
+## Минимальный UI
+
+В каталоге `ios/VPNClient` размещены файлы:
+- `VPNClientApp.swift` — точка входа приложения.
+- `ContentView.swift` — белый экран с переключателем, который управляет туннелем.
+- `VPNManager.swift` — класс‑обёртка над `NEVPNManager`.
+
 ```swift
-import NetworkExtension
-import libXray
+struct ContentView: View {
+    @State private var isOn = false
+    var body: some View {
+        ZStack {
+            Color.white.ignoresSafeArea()
+            Toggle("VPN", isOn: $isOn)
+                .padding()
+                .onChange(of: isOn) { value in
+                    if value {
+                        VPNManager.shared.start()
+                    } else {
+                        VPNManager.shared.stop()
+                    }
+                }
+        }
+    }
+}
+```
 
+## Packet Tunnel Provider
+
+`ios/VPNTunnelExtension/PacketTunnelProvider.swift` содержит запуск libXray. Расширение ищет `config.json` в контейнере App Group:
+
+```swift
 class PacketTunnelProvider: NEPacketTunnelProvider {
     override func startTunnel(options: [String : NSObject]?, completionHandler: @escaping (Error?) -> Void) {
-        // Конфиг пишется в файл в каталоге контейнера расширения
-        let config = "{" +
-            "\"log\":{\"loglevel\":\"warning\"}," +
-            "\"inbounds\":[{\"type\":\"tun\",\"interface_name\":\"utun\"}]," +
-            "\"outbounds\":[{\"type\":\"vless\",\"tag\":\"out\",\"server\":\"example.com\",\"server_port\":443,\"uuid\":\"<UUID>\",\"flow\":\"xtls-rprx-vision\",\"packet_encoding\":\"xudp\",\"security\":\"reality\",\"reality-opts\":{\"public_key\":\"<PUBLIC_KEY>\",\"short_id\":\"<SHORT_ID>\"}}]}";
-        let configURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.vpnclient")!.appendingPathComponent("config.json")
-        try? config.data(using: .utf8)?.write(to: configURL)
-        libxray_start(configURL.path) // Функция из libXray
+        let url = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.vpnclient")!.appendingPathComponent("config.json")
+        libxray_start(url.path)
         completionHandler(nil)
     }
 
@@ -56,40 +109,16 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 }
 ```
-Для работы необходимы функции `libxray_start` и `libxray_stop`, предоставляемые библиотекой.
 
-## Подключение из UI
+## Запуск приложения
 
-В основном приложении используйте `NEVPNManager` для управления состоянием:
-```swift
-let manager = NEVPNManager.shared()
-manager.loadFromPreferences { _ in
-    let proto = NETunnelProviderProtocol()
-    proto.providerBundleIdentifier = "com.example.vpnclient.VPNExtension"
-    proto.providerConfiguration = ["group": "group.vpnclient"]
-    manager.protocolConfiguration = proto
-    manager.localizedDescription = "VLESS VPN"
-    manager.isEnabled = true
-    manager.saveToPreferences { _ in
-        try? manager.connection.startVPNTunnel()
-    }
-}
-```
-Для отключения вызовите `manager.connection.stopVPNTunnel()`.
-
-## Сборка и запуск
-
-1. Откройте проект в Xcode.
-2. Выберите схему основного приложения, устройство (физический iPhone) и выполните **Product → Run**.
-3. При первом запуске система попросит разрешение на добавление VPN‑конфигурации.
-4. Используйте переключатель в UI для включения и выключения туннеля.
-
-## Настройка сервера
-
-В конфигурации, передаваемой в `libxray_start`, замените `example.com`, `UUID`, `PUBLIC_KEY` и `SHORT_ID` на реальные значения вашего VLESS сервера.
+1. Сгенерируйте `config.json` как описано выше.
+2. Откройте `ios` каталог как проект в Xcode.
+3. Выберите схему основного приложения и подключенный iPhone.
+4. Нажмите **Run**. При первом запуске система попросит разрешить создание VPN‑конфигурации.
+5. Переключатель в приложении включает и выключает VPN.
 
 ## Дополнительные материалы
 
 - Документация Xray-core: <https://xtls.github.io>
 - Пример Network Extension от Apple: [SimpleTunnel](https://github.com/networkextension/SimpleTunnel)
-
